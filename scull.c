@@ -191,8 +191,9 @@ static ssize_t scull_read( struct file *filep, char __user *buf, size_t count, l
 	unsigned int pagenum = *ppos / SCULL_PAGE_SIZE;
 	unsigned int qsetnum = (*ppos % SCULL_PAGE_SIZE) / SCULL_QUANTUM_LEN;
 	unsigned int qidx    = (*ppos % SCULL_PAGE_SIZE) % SCULL_QUANTUM_LEN;
-	unsigned int i, rem;
+	unsigned int i, rem, bytes_read;
 	struct scull_page *currpagep;
+	char *charp;
 
 	printk(KERN_INFO "%s: called scull_read()\n", scull_devp->name);
 
@@ -211,27 +212,23 @@ static ssize_t scull_read( struct file *filep, char __user *buf, size_t count, l
 		return 0;
 	}
 
+	/* rem - remaining unwritten data */
+	rem = ( (SCULL_QUANTUM_LEN - qidx) < count) ? (SCULL_QUANTUM_LEN-qidx) : count;
+	charp = &currpagep->qsetpp[qsetnum][qidx];
+	bytes_read = 0;
 
-
-	rem = SCULL_QUANTUM_LEN - qidx;
-
-
-	if ( rem < count)
+	while( rem && *charp != '\0')
 	{
-		copy_to_user( buf, &currpagep->qsetpp[qsetnum][qidx], rem);
-		*ppos += rem;
-		return rem;
-	}
-	else
-	{
-		copy_to_user( buf, &currpagep->qsetpp[qsetnum][qidx], count);
-		*ppos += count;
-		return count;
+		copy_to_user( buf++, charp++, 1);
+
+		rem --;
+		bytes_read++;
 	}
 
+	/* update file offset counter */
+	*ppos += bytes_read;
 
-	/* code should never reach this statement */
-	return 0;
+	return bytes_read;
 }
 
 
@@ -244,7 +241,7 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 	unsigned int i, j, rem;
 	struct scull_page *currpagep, *prevpagep;
 
-	printk(KERN_INFO "scull: called scull_write()\n");
+	printk(KERN_INFO "%s: called scull_write()\n", scull_devp->name);
 
 	printk(KERN_INFO "pagenum = %u\n", pagenum);
 	printk(KERN_INFO "qsetnum = %u\n", qsetnum);
