@@ -23,6 +23,7 @@ static int scull_open( struct inode *, struct file *);
 static int scull_release( struct inode *, struct file *);
 static ssize_t scull_read( struct file *, char *, size_t, loff_t *);
 static ssize_t scull_write( struct file *, const char *, size_t, loff_t *);
+static loff_t scull_llseek( struct file *, loff_t, int);
 
 
 
@@ -39,7 +40,8 @@ struct scull_page {
 
 struct scull_dev {
 	struct cdev             cdev;             /* cdev structure */
-	struct scull_page      *datap;
+	struct scull_page      *datap;            /* pointer to data */
+	loff_t                  size;             /* file size */
 	char                    name[10];         /* device name */
 };
 
@@ -51,6 +53,7 @@ static struct file_operations scull_fops = {
 	.read = scull_read,
 	.write = scull_write,
 	.release = scull_release,
+	.llseek = scull_llseek,
 };
 
 
@@ -243,10 +246,6 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 
 	printk(KERN_INFO "%s: called scull_write()\n", scull_devp->name);
 
-	printk(KERN_INFO "pagenum = %u\n", pagenum);
-	printk(KERN_INFO "qsetnum = %u\n", qsetnum);
-	printk(KERN_INFO "qidx    = %u\n", qidx);
-
 
 	/* Create first page node if this is the first call to the .write method */
 	if ( scull_devp->datap == NULL)
@@ -409,6 +408,39 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 
 	/* code should never reach this statement.. */
 	return count;
+}
+
+
+
+static loff_t scull_llseek( struct file *filep, loff_t off, int whence)
+{
+	//struct scull_dev *scull_devp = filep->private_data;
+	int newpos;
+
+	switch( whence)
+	{
+		case 0: /* SEEK_SET */
+			newpos = off;
+			break;
+
+		case 1: /* SEEK_CUR */
+			newpos = filep->f_pos + off;
+			break;
+
+		case 2: /* SEEK_END */
+			return -EINVAL; /* SCULL_TBD: not yet implemented */
+
+		default: /* Can't happen */
+			return -EINVAL;
+	}
+
+	/* check that newpos is valid */
+	if ( newpos < 0)
+		return -EINVAL;
+
+	filep->f_pos = newpos;
+
+	return filep->f_pos;
 }
 
 
