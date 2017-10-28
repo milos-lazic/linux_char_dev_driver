@@ -6,6 +6,7 @@
 #include <linux/cdev.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Milos");
@@ -41,8 +42,9 @@ struct scull_page {
 struct scull_dev {
 	struct cdev             cdev;             /* cdev structure */
 	struct scull_page      *datap;            /* pointer to data */
-	loff_t                  size;             /* file size */
+	loff_t                  size;             /* file size  - SCULL_TBD: not yet in use */
 	char                    name[10];         /* device name */
+	struct mutex            mx;               /* mutex */
 };
 
 
@@ -91,7 +93,13 @@ static int __init scull_init(void)
 			return -ENOMEM;
 		}
 
+		/* initialize device mutex */
+		mutex_init( &scull_devp[i]->mx);
+
+		/* store device name */
 		sprintf( scull_devp[i]->name, "scull%d", i);
+
+		/* set data pointer to null (no data stored on initializtaion) */
 		scull_devp[i]->datap = NULL;
 
 		/* Connect file operations with cdev */
@@ -202,9 +210,10 @@ static ssize_t scull_read( struct file *filep, char __user *buf, size_t count, l
 
 	currpagep = scull_devp->datap; /* set current page pointer to page 0 */
 
+	/* enter critical section */
+	mutex_lock( &scull_devp->mx); /* SCULL_TBD: replace with a read lock */
+
 	i = 0;
-
-
 	while ( i < pagenum && currpagep != NULL)
 	{
 		currpagep = currpagep->next;
@@ -212,6 +221,8 @@ static ssize_t scull_read( struct file *filep, char __user *buf, size_t count, l
 
 	if ( currpagep == NULL)
 	{
+		/* leave critical section */
+		mutex_unlock( &scull_devp->mx);
 		return 0;
 	}
 
@@ -231,6 +242,9 @@ static ssize_t scull_read( struct file *filep, char __user *buf, size_t count, l
 	/* update file offset counter */
 	*ppos += bytes_read;
 
+	/* leave critical section */
+	mutex_unlock( &scull_devp->mx);
+
 	return bytes_read;
 }
 
@@ -246,6 +260,8 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 
 	printk(KERN_INFO "%s: called scull_write()\n", scull_devp->name);
 
+	/* enter critical section */
+	mutex_lock( &scull_devp->mx);
 
 	/* Create first page node if this is the first call to the .write method */
 	if ( scull_devp->datap == NULL)
@@ -255,6 +271,10 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 		{
 			/* Unable to allocate a new scull_page struct */
 			printk(KERN_ALERT "%s: bad kmalloc (line %u)\n", scull_devp->name, __LINE__);
+
+			/* leave critical section */
+			mutex_unlock( &scull_devp->mx);
+
 			return -ENOMEM;
 		}
 
@@ -268,6 +288,10 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 			printk(KERN_ALERT "%s: bad kmalloc (line %u)\n", scull_devp->name, __LINE__);
 
 			kfree(scull_devp->datap);
+
+			/* leave critical section */
+			mutex_unlock( &scull_devp->mx);
+
 			return -ENOMEM;
 		}
 
@@ -288,6 +312,9 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 				kfree( scull_devp->datap->qsetpp);
 
 				kfree( scull_devp->datap);
+
+				/* leave critical section */
+				mutex_unlock( &scull_devp->mx);
 
 				return -ENOMEM;
 			}
@@ -328,6 +355,9 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 				/* Unable to create new page */
 				printk(KERN_ALERT "%s: bad kmalloc (line %u)\n", scull_devp->name, __LINE__);
 
+				/* leave critical section */
+				mutex_unlock( &scull_devp->mx);
+
 				return -ENOMEM;
 			}
 
@@ -341,6 +371,9 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 				printk(KERN_ALERT "%s: bad kmalloc (line %u)\n", scull_devp->name, __LINE__);
 
 				kfree( currpagep);
+
+				/* leave critical section */
+				mutex_unlock( &scull_devp->mx);
 
 				return -ENOMEM;
 			}
@@ -362,6 +395,9 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 					kfree( currpagep->qsetpp);
 
 					kfree( currpagep);
+
+					/* leave critical section */
+					mutex_unlock( &scull_devp->mx);
 
 					return -ENOMEM;
 				}
@@ -387,6 +423,7 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 		}
 	}
 
+	/* SCULL_TBD: rework section below */
 
 	/* Insert data from user (copy_from_user) */
 	rem = SCULL_QUANTUM_LEN - qidx; /* space remaining in current quantum */
@@ -395,16 +432,25 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 	{
 		copy_from_user( &currpagep->qsetpp[qsetnum][qidx], buf, rem);
 		*ppos += rem;
+
+		/* leave critical section */
+		mutex_unlock( &scull_devp->mx);
+
 		return rem;
 	}
 	else
 	{
 		copy_from_user( &currpagep->qsetpp[qsetnum][qidx], buf, count);
 		*ppos += count;
+
+		/* leave critical section */
+		mutex_unlock( &scull_devp->mx);
+
 		return count;
 	}
 
-	
+	/* leave critical section */
+	mutex_unlock( &scull_devp->mx);
 
 	/* code should never reach this statement.. */
 	return count;
@@ -414,7 +460,7 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 
 static loff_t scull_llseek( struct file *filep, loff_t off, int whence)
 {
-	//struct scull_dev *scull_devp = filep->private_data;
+	struct scull_dev *scull_devp = filep->private_data;
 	int newpos;
 
 	switch( whence)
@@ -438,7 +484,15 @@ static loff_t scull_llseek( struct file *filep, loff_t off, int whence)
 	if ( newpos < 0)
 		return -EINVAL;
 
+
+	/* enter critical section */
+	mutex_lock( &scull_devp->mx);
+
+	/* update file offset */
 	filep->f_pos = newpos;
+
+	/* leave critical section */
+	mutex_unlock( &scull_devp->mx);
 
 	return filep->f_pos;
 }
