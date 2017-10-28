@@ -255,8 +255,9 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 	unsigned int pagenum = *ppos / SCULL_PAGE_SIZE;
 	unsigned int qsetnum = (*ppos % SCULL_PAGE_SIZE) / SCULL_QUANTUM_LEN;
 	unsigned int qidx    = (*ppos % SCULL_PAGE_SIZE) % SCULL_QUANTUM_LEN;
-	unsigned int i, j, rem;
+	unsigned int i, j, rem, bytes_written;
 	struct scull_page *currpagep, *prevpagep;
+	char *writep;
 
 	printk(KERN_INFO "%s: called scull_write()\n", scull_devp->name);
 
@@ -423,37 +424,26 @@ static ssize_t scull_write( struct file *filep, const char *buf, size_t count, l
 		}
 	}
 
-	/* SCULL_TBD: rework section below */
+	/* Write data to device */
+	rem = ( (SCULL_QUANTUM_LEN - qidx) < count) ? (SCULL_QUANTUM_LEN - qidx) : count;
+	writep = &currpagep->qsetpp[qsetnum][qidx];
+	bytes_written = 0;
 
-	/* Insert data from user (copy_from_user) */
-	rem = SCULL_QUANTUM_LEN - qidx; /* space remaining in current quantum */
-
-	if( rem < count)
+	while( rem)
 	{
-		copy_from_user( &currpagep->qsetpp[qsetnum][qidx], buf, rem);
-		*ppos += rem;
+		copy_from_user( writep++, buf++, 1);
 
-		/* leave critical section */
-		mutex_unlock( &scull_devp->mx);
-
-		return rem;
+		rem--;
+		bytes_written++;
 	}
-	else
-	{
-		copy_from_user( &currpagep->qsetpp[qsetnum][qidx], buf, count);
-		*ppos += count;
 
-		/* leave critical section */
-		mutex_unlock( &scull_devp->mx);
-
-		return count;
-	}
+	/* Update file offset counter */
+	*ppos += bytes_written;
 
 	/* leave critical section */
 	mutex_unlock( &scull_devp->mx);
 
-	/* code should never reach this statement.. */
-	return count;
+	return bytes_written;
 }
 
 
