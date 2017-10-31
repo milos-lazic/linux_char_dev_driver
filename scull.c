@@ -9,7 +9,7 @@
 #include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Milos");
+MODULE_AUTHOR("Milos Lazic");
 MODULE_DESCRIPTION("scull - a character device driver");
 MODULE_VERSION("0.1");
 
